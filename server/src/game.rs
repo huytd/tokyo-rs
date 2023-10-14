@@ -139,6 +139,7 @@ impl Game {
 
         if let Some(idx) = self.state.players.iter().position(|p| p.id == player_id) {
             self.state.players.remove(idx);
+            self.state.scoreboard.remove(&player_id);
         }
         if let Some(idx) = self.state.dead.iter().position(|p| p.player.id == player_id) {
             self.state.dead.remove(idx);

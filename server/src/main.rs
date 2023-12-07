@@ -14,6 +14,7 @@ mod models;
 use crate::actors::GameActor;
 use actix::{Actor, Addr, System};
 use actix_web::{http::Method, middleware::Logger, server, App};
+use actors::RoomActor;
 use lazy_static::lazy_static;
 use listenfd::ListenFd;
 use tokyo::models::GameConfig;
@@ -29,6 +30,7 @@ pub struct AppConfig {
 
 pub struct AppState {
     game_addr: Addr<GameActor>,
+    room_actor_addr: Addr<RoomActor>,
 }
 
 const CONFIG_FILE_PATH: &str = "tokyo.toml";
@@ -54,13 +56,23 @@ fn main() -> Result<(), String> {
     let game_actor = GameActor::new(APP_CONFIG.game_config);
     let game_actor_addr = game_actor.start();
 
+    let room_actor = RoomActor::new(APP_CONFIG.game_config);
+    let room_actor_addr = room_actor.start();
+
     let mut server = server::new(move || {
-        let app_state = AppState { game_addr: game_actor_addr.clone() };
+        let app_state = AppState { 
+            game_addr: game_actor_addr.clone(), 
+            room_actor_addr: room_actor_addr.clone() 
+        };
 
         App::with_state(app_state)
             .middleware(Logger::default())
             .resource("/socket", |r| {
                 r.method(Method::GET).with(controllers::api::socket_handler);
+            })
+            .resource("/rooms", |r| {
+                r.method(Method::POST).with(controllers::api::create_room_handler);
+                r.method(Method::GET).with(controllers::api::list_rooms_handler);
             })
             .resource("/spectate", |r| {
                 r.method(Method::GET).with(controllers::api::spectate_handler);

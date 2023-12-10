@@ -14,7 +14,7 @@ mod models;
 use crate::actors::GameActor;
 use actix::{Actor, Addr, System};
 use actix_web::{http::Method, middleware::Logger, server, App};
-use actors::RoomActor;
+use actors::{RoomActor, redis_actor::create_redis_actor, RedisActor};
 use lazy_static::lazy_static;
 use listenfd::ListenFd;
 use tokyo::models::GameConfig;
@@ -30,6 +30,7 @@ pub struct AppConfig {
 
 pub struct AppState {
     game_addr: Addr<GameActor>,
+    redis_actor_addr: Addr<RedisActor>,
     room_actor_addr: Addr<RoomActor>,
 }
 
@@ -53,6 +54,9 @@ fn main() -> Result<(), String> {
 
     let actor_system = System::new("meetup-server");
 
+    let redis_url = "redis://127.0.0.1/";
+    let redis_actor_addr = create_redis_actor(redis_url);
+
     let game_actor = GameActor::new(APP_CONFIG.game_config);
     let game_actor_addr = game_actor.start();
 
@@ -61,7 +65,8 @@ fn main() -> Result<(), String> {
 
     let mut server = server::new(move || {
         let app_state = AppState { 
-            game_addr: game_actor_addr.clone(), 
+            game_addr: game_actor_addr.clone(),
+            redis_actor_addr: redis_actor_addr.clone(),
             room_actor_addr: room_actor_addr.clone() 
         };
 

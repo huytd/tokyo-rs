@@ -1,9 +1,14 @@
+use std::collections::HashMap;
+
 use crate::{
-    actors::{ClientWsActor, CreateRoom, JoinRoom, ListRooms},
+    actors::{
+        redis_actor::SetRoomCommand, room_actor::RoomCreated, ClientWsActor, CreateRoom,
+        GetRoomFieldCommand, JoinRoom, ListRooms, UpdateRoomFieldCommand,
+    },
     models::messages::ServerCommand,
     AppState,
 };
-use actix_web::{HttpRequest, Query, State, http::StatusCode};
+use actix_web::{http::StatusCode, HttpRequest, Query, State};
 use futures::Future;
 
 #[derive(Debug, Deserialize)]
@@ -27,11 +32,31 @@ pub fn socket_handler(
             .wait()
             .unwrap();
         match r {
-            Ok(room) => actix_web::ws::start(
-                &req,
-                ClientWsActor::new(room.game_addr, query.key.clone(), query.name.clone()),
-            ),
-            Err(err) => Err(actix_web::error::ErrorBadRequest(err.to_string())),
+            Ok(room) => {
+                let mut player_count: u32 = 0;
+                if let Ok(player_count_str) = state.redis_actor_addr.send(GetRoomFieldCommand {
+                    room_token: query.room_token.clone(),
+                    field: String::from("in_room_players"),
+                }).wait()? {
+                    player_count = player_count_str
+                        .parse::<u32>()
+                        .map_err(|err| actix_web::error::ErrorInternalServerError(err.to_string()))?;
+                }
+                player_count = player_count + 1;
+                let _ = state.redis_actor_addr.send(UpdateRoomFieldCommand {
+                    room_token: query.room_token.clone(),
+                    field: String::from("in_room_players"),
+                    value: format!("{}", player_count),
+                });
+                
+                actix_web::ws::start(
+                    &req,
+                    ClientWsActor::new(room.game_addr, query.key.clone(), query.name.clone()),
+                )
+            },
+            Err(err) => {
+                Err(actix_web::error::ErrorBadRequest(err.to_string()))
+            },
         }
     } else {
         Err(actix_web::error::ErrorBadRequest("Invalid API Key"))
@@ -97,6 +122,13 @@ pub fn create_room_handler(
     match r {
         Ok(room) => {
             let body = serde_json::to_string(&room).unwrap();
+
+            // cache created room info
+            let cache_fields = create_room_fields(&room);
+            let _ = state
+                .redis_actor_addr
+                .send(SetRoomCommand { room_token: room.token, fields: cache_fields })
+                .wait();
             Ok(actix_web::HttpResponse::with_body(StatusCode::OK, body))
         },
         Err(_) => Err(actix_web::error::ErrorBadRequest("Failed to create room")),
@@ -114,4 +146,14 @@ pub fn list_rooms_handler(
         },
         Err(_) => Err(actix_web::error::ErrorBadRequest("Failed to list rooms")),
     }
+}
+
+fn create_room_fields(room: &RoomCreated) -> HashMap<String, String> {
+    let mut fields = HashMap::new();
+    fields.insert("name".to_string(), room.name.clone());
+    fields.insert("time_limit_seconds".to_string(), room.time_limit_seconds.to_string());
+    fields.insert("in_room_players".to_string(), String::from("0"));
+    fields.insert("status".to_string(), String::from("ready"));
+
+    fields
 }

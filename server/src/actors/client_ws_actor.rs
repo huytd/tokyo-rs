@@ -1,5 +1,5 @@
 use crate::{
-    actors::GameActor,
+    actors::{GameActor, RedisActor},
     models::messages::{ClientStop, PlayerGameCommand},
     AppState,
 };
@@ -13,18 +13,20 @@ const ACTIONS_PER_SECOND: u32 = 22;
 #[derive(Debug)]
 pub struct ClientWsActor {
     game_addr: Addr<GameActor>,
+    redis_actor_addr: Addr<RedisActor>,
     api_key: String,
     team_name: String,
+    room_token: String,
     rate_limiter: DirectRateLimiter<GCRA>,
 }
 
 impl ClientWsActor {
-    pub fn new(game_addr: Addr<GameActor>, api_key: String, team_name: String) -> ClientWsActor {
+    pub fn new(game_addr: Addr<GameActor>, redis_actor_addr: Addr<RedisActor>, api_key: String, team_name: String, room_token: String) -> ClientWsActor {
         let rate_limiter = DirectRateLimiter::<GCRA>::per_second(
             std::num::NonZeroU32::new(ACTIONS_PER_SECOND).unwrap(),
         );
 
-        ClientWsActor { game_addr, api_key, team_name, rate_limiter }
+        ClientWsActor { game_addr, redis_actor_addr, api_key, team_name, room_token, rate_limiter }
     }
 }
 
@@ -37,6 +39,13 @@ impl Actor for ClientWsActor {
             self.team_name.clone(),
             ctx.address(),
         ));
+        if self.api_key != "SPECTATOR" {
+            println!("API key {} joined", self.api_key);
+            self.redis_actor_addr.do_send(crate::actors::redis_actor::AddRoomPlayerCommand{
+                room_token: self.room_token.clone(),
+                player_key: self.api_key.clone(),
+            });
+        }
     }
 
     fn stopped(&mut self, ctx: &mut Self::Context) {
@@ -45,6 +54,10 @@ impl Actor for ClientWsActor {
             self.api_key.clone(),
             ctx.address(),
         ));
+        self.redis_actor_addr.do_send(crate::actors::redis_actor::RemoveRoomPlayerCommand{
+            room_token: self.room_token.clone(),
+            player_key: self.api_key.clone(),
+        });
     }
 }
 

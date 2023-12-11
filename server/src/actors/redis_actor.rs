@@ -29,6 +29,26 @@ pub struct SetRoomCommand {
     pub fields: HashMap<String, String>, // Use a HashMap to represent multiple fields
 }
 
+#[derive(Message)]
+#[rtype(result = "Result<u32, redis::RedisError>")]
+pub struct GetRoomSizeCommand {
+    pub room_token: String,
+}
+
+#[derive(Message)]
+#[rtype(result = "Result<String, redis::RedisError>")]
+pub struct AddRoomPlayerCommand {
+    pub room_token: String,
+    pub player_key: String,
+}
+
+#[derive(Message)]
+#[rtype(result = "Result<String, redis::RedisError>")]
+pub struct RemoveRoomPlayerCommand {
+    pub room_token: String,
+    pub player_key: String,
+}
+
 impl Actor for RedisActor {
     type Context = Context<Self>;
 }
@@ -56,7 +76,6 @@ impl Handler<UpdateRoomFieldCommand> for RedisActor {
         let value = msg.value.clone();
 
         let result: RedisResult<()> = con.hset(room_token, field, value);
-        println!("Update result: {:?}", result);
         result
             .map_err(|e| e.into())
             .map(|_| format!("Field {} set for room {}", msg.field, msg.room_token))
@@ -75,7 +94,40 @@ impl Handler<SetRoomCommand> for RedisActor {
         let result: RedisResult<()> = con.hset_multiple(room_token, &fields);
 
         result.map_err(|e| e.into())
-            .map(|_| format!("Fields set for user {}", msg.room_token))
+            .map(|_| format!("Fields set for room {}", msg.room_token))
+    }
+}
+
+impl Handler<GetRoomSizeCommand> for RedisActor {
+    type Result = Result<u32, redis::RedisError>;
+
+    fn handle(&mut self, msg: GetRoomSizeCommand, _: &mut Self::Context) -> Self::Result {
+        let mut con: Connection = self.client.get_connection()?;
+        let room_token = format!("room:{}:players", msg.room_token);
+        let result: RedisResult<u32> = con.scard(room_token);
+        result.map_err(|e| e.into())
+    }
+}
+
+impl Handler<AddRoomPlayerCommand> for RedisActor {
+    type Result = Result<String, redis::RedisError>;
+
+    fn handle(&mut self, msg: AddRoomPlayerCommand, _: &mut Self::Context) -> Self::Result {
+        let mut con: Connection = self.client.get_connection()?;
+        let room_token = format!("room:{}:players", msg.room_token);
+        let result: RedisResult<String> = con.sadd(room_token, msg.player_key);
+        result.map_err(|e| e.into())
+    }
+}
+
+impl Handler<RemoveRoomPlayerCommand> for RedisActor {
+    type Result = Result<String, redis::RedisError>;
+
+    fn handle(&mut self, msg: RemoveRoomPlayerCommand, _: &mut Self::Context) -> Self::Result {
+        let mut con: Connection = self.client.get_connection()?;
+        let room_token = format!("room:{}:players", msg.room_token);
+        let result: RedisResult<String> = con.srem(room_token, msg.player_key);
+        result.map_err(|e| e.into())
     }
 }
 
